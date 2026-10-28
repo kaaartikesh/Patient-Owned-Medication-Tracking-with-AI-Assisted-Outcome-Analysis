@@ -7,3 +7,9 @@ app.db
 *.sqlite3
 __pycache__/
 .pytest_cache/
+
+.venv/
+__pycache__/
+.env
+.env.*
+!.env.example
