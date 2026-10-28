@@ -1,52 +1,48 @@
-# backend/app/auth/dependencies.py
-
+import uuid
 from fastapi import Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
-from jose import jwt, JWTError
+from jose import JWTError
 
 from app.database import get_db
 from app.models.user import User
-from app.config import settings
+from app.auth.security import decode_access_token
 
-# Tells FastAPI/Swagger where the frontend should POST credentials to get a token
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
+bearer_scheme = HTTPBearer()
 
 
-# Extracts the JWT from the request, verifies it, and loads the matching User row
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
-    credentials_exception = HTTPException(
-        status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Could not validate credentials",
-        headers={"WWW-Authenticate": "Bearer"},
-    )
+def get_current_user(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
+    db: Session = Depends(get_db),
+) -> User:
+    token = credentials.credentials
+    try:
+        payload = decode_access_token(token)
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
+        )
+
+    sub = payload.get("sub")
+    if not sub:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token missing subject identifier",
+        )
 
     try:
-        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=["HS256"])
-        user_id: str = payload.get("sub")
+        user_id = uuid.UUID(str(sub))
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid subject format in token",
+        )
 
-        if user_id is None:
-            raise credentials_exception
-
-    except JWTError:
-        raise credentials_exception
-
-    # "sub" is the user's UUID (set in router.py's create_access_token call),
-    # not an email — so we look up by id, not email
     user = db.query(User).filter(User.id == user_id).first()
-
-    if user is None:
-        raise credentials_exception
-
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+        )
     return user
-
-# ---------------------------------------------------------------------------
-# Project context: this is the gateway every protected route depends on —
-# any endpoint that needs "who is calling right now" (encounter creation,
-# medication writes, consent checks) adds Depends(get_current_user) and
-# gets a real User object back, or a 401 before it even runs. It decodes
-# the JWT that router.py's /login issues, using the same JWT_SECRET from
-# config.py, and resolves it against models/user.py's User table via the
-# "sub" claim (user.id, not email — matches what create_access_token
-# actually encodes).
-# ---------------------------------------------------------------------------

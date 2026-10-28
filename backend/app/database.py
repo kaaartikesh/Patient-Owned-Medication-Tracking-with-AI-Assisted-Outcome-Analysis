@@ -4,7 +4,11 @@ from app.config import settings
 
 # Initializes the database engine using the connection string from your .env file.
 # This is the actual bridge between your Python app and your PostgreSQL database.
-engine = create_engine(settings.DATABASE_URL)
+connect_args = {}
+if settings.DATABASE_URL.startswith("sqlite"):
+    connect_args["check_same_thread"] = False
+
+engine = create_engine(settings.DATABASE_URL, connect_args=connect_args)
 
 # Creates a factory for generating new database sessions.
 # autocommit=False ensures we manually control when data is saved to prevent partial writes.

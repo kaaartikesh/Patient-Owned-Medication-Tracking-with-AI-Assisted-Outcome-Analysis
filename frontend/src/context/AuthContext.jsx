@@ -1,10 +1,15 @@
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useState, useEffect } from "react";
+import { getMe } from "../api/index";
 
 const AuthContext = createContext(null);
 
 function decodeToken(token) {
-  const payload = token.split(".")[1];
-  return JSON.parse(atob(payload));
+  try {
+    const payload = token.split(".")[1];
+    return JSON.parse(atob(payload));
+  } catch {
+    return null;
+  }
 }
 
 export function AuthProvider({ children }) {
@@ -14,10 +19,28 @@ export function AuthProvider({ children }) {
   const [token, setToken] = useState(storedToken);
   const [user, setUser] = useState(initialUser);
 
+  useEffect(() => {
+    if (token) {
+      getMe()
+        .then((profile) => {
+          setUser((prev) => ({ ...prev, ...profile }));
+        })
+        .catch(() => {
+          logout();
+        });
+    }
+  }, [token]);
+
   function login(newToken) {
     localStorage.setItem("token", newToken);
     setToken(newToken);
-    setUser(decodeToken(newToken));
+    const decoded = decodeToken(newToken);
+    setUser(decoded);
+    getMe()
+      .then((profile) => {
+        setUser((prev) => ({ ...prev, ...profile }));
+      })
+      .catch(() => {});
   }
 
   function logout() {
@@ -27,7 +50,7 @@ export function AuthProvider({ children }) {
   }
 
   return (
-    <AuthContext.Provider value={{ token, user, login, logout }}>
+    <AuthContext.Provider value={{ token, user, login, logout, refreshUser: () => getMe().then(setUser) }}>
       {children}
     </AuthContext.Provider>
   );
@@ -36,4 +59,3 @@ export function AuthProvider({ children }) {
 export function useAuth() {
   return useContext(AuthContext);
 }
-// What this does: decodeToken pulls apart a JWT (which has three dot-separated parts) and reads the middle part — that's where your backend put sub (user id) and role when it created the token. AuthProvider checks localStorage once when the app starts (so refreshing the page doesn't log you out), and exposes login()/logout() functions plus the current user info to every part of the app that needs it.
